@@ -2,6 +2,21 @@
 
 Lightweight browser gaming portal: React + Vite + Cloudflare Workers Static Assets + D1.
 
+## Live deployment
+| Item | Value |
+|---|---|
+| Public URL | https://slopecurve.hamdi708090.workers.dev |
+| Worker | `slopecurve` (account `a2cf8c46059a89fb2534486b47b6e05e`) |
+| D1 database | `slopecurve-db` → `3aa5cb41-323e-4399-bb02-cad56f322964` (WEUR) |
+| Secrets set | `CSRF_SECRET`, `AI_KEYS_SECRET` |
+| Not configured yet | `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, `ADMIN_EMAILS` → `/admin` is **fail-closed** (API returns 401) until Cloudflare Access exists |
+| Custom domain | `slopecurve.com` still uses Namecheap nameservers; not attached |
+
+`.env.production` (committed, public values only) sets `VITE_SITE_URL`, and `vars.SITE_URL`
+in `wrangler.jsonc` holds the same origin. When `slopecurve.com` is attached to the Worker,
+change **both** to `https://slopecurve.com` and redeploy.
+
+
 ## Features
 - Public: home, games, game detail with safe iframe embed, categories, new/hot, blog/guides, search, comments (moderated).
 - Admin `/admin`: Cloudflare Access protected, overview counts, games CRUD (draft/published/featured/new/hot/archived), categories, comments moderation, blog/guides, AI Writer, settings.
@@ -83,10 +98,12 @@ Runtime vars live in `wrangler.jsonc` (`vars`), secrets are set once on the Work
 | `ADS_ENABLED`, `ANALYTICS_ENABLED` | var | `false` by default |
 
 > `SITE_URL` and `VITE_SITE_URL` must point at the **same** public origin, otherwise the
-> server-rendered and client-side canonical tags disagree. The committed default is
-> `https://slopecurve.com`; change both if you launch on `*.workers.dev` first.
+> server-rendered and client-side canonical tags disagree. They currently both hold
+> `https://slopecurve.hamdi708090.workers.dev` (in `wrangler.jsonc` and `.env.production`).
 
 ## Create the production database
+Already done for this deployment (`slopecurve-db` → `3aa5cb41-323e-4399-bb02-cad56f322964`, all 6
+migrations applied). To repeat it from scratch:
 ```bash
 npx wrangler login
 npx wrangler d1 create slopecurve-db
@@ -114,7 +131,7 @@ npm run db:apply:remote   # production schema — run once, then after new migra
    # optional: npx wrangler secret put GEMINI_API_KEY
    ```
 5. Apply migrations: `npm run db:apply:remote`.
-6. First deploy URL: `https://slopecurve.<your-subdomain>.workers.dev` (`workers_dev` is enabled in `wrangler.jsonc`).
+6. First deploy URL: `https://slopecurve.hamdi708090.workers.dev` (`workers_dev` is enabled in `wrangler.jsonc`).
 
 Every push to `main` then rebuilds and deploys. Pull requests are verified by
 `.github/workflows/ci.yml` (typecheck + unit tests + build).
@@ -145,10 +162,12 @@ git push -u origin main
 ```
 Never commit `.dev.vars`, `.env*`, `node_modules/`, `dist/` or `.wrangler/` — they are git-ignored.
 
-## Admin access (Cloudflare Access)
+## Admin access (Cloudflare Access) — the one remaining step
+Admin routes are already **fail-closed**: `/api/admin/*` returns `401` until all three vars exist,
+so the CMS cannot be reached at all right now. To enable it:
 1. Zero Trust → Access → Applications → **Add a self-hosted application**:
-   - `slopecurve.com` path `admin`
-   - `slopecurve.com` path `api/admin`
+   - `slopecurve.hamdi708090.workers.dev` path `admin`
+   - `slopecurve.hamdi708090.workers.dev` path `api/admin`
 2. Add an **Allow** policy with the email(s) you put in `ADMIN_EMAILS`.
 3. Copy each application's **Audience (AUD) tag** into `ACCESS_AUD`, and set
    `ACCESS_TEAM_DOMAIN=https://<team>.cloudflareaccess.com`.

@@ -22,8 +22,8 @@
     {
       "binding": "DB",
       "database_name": "slopecurve-db",
-      // Run `npx wrangler d1 create slopecurve-db` and paste the printed id here.
-      "database_id": "REPLACE_WITH_D1_ID"
+      // Created 2026-10-26 (`npx wrangler d1 create slopecurve-db`, region WEUR).
+      "database_id": "3aa5cb41-323e-4399-bb02-cad56f322964"
     }
   ],
 
@@ -32,8 +32,10 @@
   // "routes": [{ "pattern": "slopecurve.com", "custom_domain": true }],
 
   "vars": {
-    // Must match VITE_SITE_URL; both are the public origin used for canonicals/OG/sitemap.
-    "SITE_URL": "https://slopecurve.com",
+    // Must match .env.production → VITE_SITE_URL; both are the public origin used
+    // for canonicals/OG/sitemap. Switch both to https://slopecurve.com once the
+    // domain's nameservers point at Cloudflare.
+    "SITE_URL": "https://slopecurve.hamdi708090.workers.dev",
     "TRUSTED_GAME_HOSTS": "game-host.example.com,trusted-games.example.com,azgames.io,github.io",
     "ADS_ENABLED": "false",
     "ANALYTICS_ENABLED": "false",

@@ -38,7 +38,7 @@
 - Per-page title/desc/canonical/OG/Twitter, H1, breadcrumbs, JSON-LD matching visible content.
 - Worker SSR: same injected HTML for all UAs (no bot-gating); `src/lib/seoDoc.ts` is the pure, tested core.
 - Genuine 404 (noindex) for missing/draft/unknown; assets pass through via ASSETS binding.
-- `SITE_URL=https://slopecurve.com`. Sitemap = published only; landing pages use root `/<slug>` canonicals.
+- `SITE_URL` must equal the build-time `VITE_SITE_URL` (`.env.production`). Currently both are `https://slopecurve.hamdi708090.workers.dev`; switching to `https://slopecurve.com` requires changing both and redeploying. Sitemap = published only; landing pages use root `/<slug>` canonicals.
 
 ## Testing
 - `tests/validation.test.ts` (URLs, slugs, XSS, SEO, comments).
@@ -48,3 +48,10 @@
 
 ## Deployment
 D1 create → migrations → secrets → build → deploy → domain → verify routes/sitemap/robots → create admin.
+
+Current state (2026-10-26): Worker `slopecurve` is live at `https://slopecurve.hamdi708090.workers.dev`
+on account `a2cf8c46059a89fb2534486b47b6e05e`; D1 `slopecurve-db` (`3aa5cb41-323e-4399-bb02-cad56f322964`,
+WEUR) has all 6 migrations and the 8 games + 6 categories + 2 posts + settings. `CSRF_SECRET` and
+`AI_KEYS_SECRET` are set. Cloudflare Access is **not** configured yet — `/api/admin/*` returns 401
+(fail-closed), so the CMS is intentionally unreachable. `slopecurve.com` still points at Namecheap
+nameservers and is not attached to the Worker.

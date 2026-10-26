@@ -9,6 +9,7 @@ test-results/
 .env
 .env.*
 !.env.example
+!.env.production
 .env.local
 dev-pid.txt
 *.log
