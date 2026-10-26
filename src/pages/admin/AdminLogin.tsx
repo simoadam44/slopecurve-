@@ -20,6 +20,7 @@ export function AdminLogin() {
   const [state, setState] = useState<AuthState>("checking");
   const [email, setEmail] = useState("");
   const [isLocal, setIsLocal] = useState(false);
+  const [problem, setProblem] = useState("");
 
   useDocumentMeta("Admin sign in | SlopeCurve", "Sign in to the SlopeCurve admin dashboard.");
   useRobots("noindex, nofollow");
@@ -32,9 +33,19 @@ export function AdminLogin() {
 
   const check = useCallback(async () => {
     setState("checking");
+    setProblem("");
     try {
       const r = await adminFetch("/api/admin/me", { headers: { accept: "application/json" } });
       if (!r.ok) {
+        // The server explains configuration problems (503) instead of a bare 401.
+        let detail = "";
+        try {
+          const body = (await r.json()) as { error?: string; code?: string };
+          if (body.code === "access_not_configured" || body.code === "access_team_unreachable") detail = String(body.error || "");
+        } catch {
+          /* non-JSON body: keep the generic message */
+        }
+        setProblem(detail);
         setState("signed-out");
         return;
       }
@@ -71,6 +82,11 @@ export function AdminLogin() {
             <p aria-live="polite" style={{ margin: "0 0 12px" }}>
               {email ? `Signed in as ${email}.` : "You are not signed in yet."}
             </p>
+            {problem ? (
+              <p className="small" role="alert" style={{ margin: "0 0 12px", color: "#fca5a5" }}>
+                {problem}
+              </p>
+            ) : null}
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <a className="btn" href={accessHref}>Continue with Cloudflare Access</a>
               <button className="btn-secondary btn" type="button" onClick={check}>Check access again</button>

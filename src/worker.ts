@@ -21,7 +21,7 @@ import { legalPage } from "./lib/legal";
 import { sanitizeRichText as sanitizeHtml } from "./lib/sanitize";
 import { cacheControlFor, isAdminPath, isAssetPassthrough, securityHeaders } from "./lib/security";
 import { accessConfig, isSameOrigin, verifyAccessToken } from "./lib/access";
-import type { AccessPrincipal } from "./lib/access";
+import type { AccessConfig, AccessPrincipal } from "./lib/access";
 import { issueCsrfToken, verifyCsrfToken } from "./lib/csrf";
 import { DEFAULT_JSON_LIMIT, isJsonRequest, readJson } from "./lib/request";
 import { createRateLimiter } from "./lib/rateLimit";
@@ -125,6 +125,25 @@ async function requireAdmin(req: Request, env: Env): Promise<AccessPrincipal | n
   if (!config) return null;
   const token = req.headers.get("cf-access-jwt-assertion") || "";
   return verifyAccessToken(token, config);
+}
+
+// Cached probe result so an unauthenticated caller cannot turn /api/admin/me into a
+// request amplifier against the configured team domain.
+let accessProbe: { at: number; ok: boolean } | null = null;
+
+/** Best-effort check that a Cloudflare Access team actually answers at the configured domain. */
+async function accessTeamReachable(config: AccessConfig): Promise<boolean> {
+  const now = Date.now();
+  if (accessProbe && now - accessProbe.at < 60_000) return accessProbe.ok;
+  let ok = false;
+  try {
+    const res = await fetch(`${config.teamDomain}/cdn-cgi/access/certs`, { signal: AbortSignal.timeout(3000) });
+    ok = res.ok;
+  } catch {
+    ok = false;
+  }
+  accessProbe = { at: now, ok };
+  return ok;
 }
 
 function adminOriginAllowed(req: Request, env: Env): boolean {
@@ -559,7 +578,26 @@ export default {
     // --- auth: Cloudflare Access only (edge handles login/logout) ---
     if (path === "/api/admin/me" && req.method === "GET") {
       const principal = await requireAdmin(req, env);
-      if (!principal) return json({ error: "Unauthorized" }, 401, H);
+      if (!principal) {
+        // Say *why* the dashboard is closed: missing secrets, a team domain that does not answer,
+        // or simply not signed in. No credential or secret value is ever echoed back.
+        const config = accessConfig(env);
+        if (!config) {
+          return json(
+            { error: "Cloudflare Access is not configured yet (ACCESS_TEAM_DOMAIN, ACCESS_AUD, ADMIN_EMAILS).", code: "access_not_configured" },
+            503,
+            H,
+          );
+        }
+        if (!(await accessTeamReachable(config))) {
+          return json(
+            { error: "No Cloudflare Access team answered at the configured team domain. Create the Zero Trust application first.", code: "access_team_unreachable" },
+            503,
+            H,
+          );
+        }
+        return json({ error: "Unauthorized", code: "unauthorized" }, 401, H);
+      }
       const secret = adminCsrfSecret(env);
       if (!secret) return json({ error: "CSRF secret not configured." }, 503, H);
       return json({ ok: true, email: principal.email, csrf: await issueCsrfToken(secret, principal.sub) }, 200, H);
