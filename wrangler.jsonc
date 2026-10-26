@@ -32,7 +32,7 @@
   // "routes": [{ "pattern": "slopecurve.com", "custom_domain": true }],
 
   "vars": {
-    // Must match .env.production → VITE_SITE_URL; both are the public origin used
+    // Must match .env.production -> VITE_SITE_URL; both are the public origin used
     // for canonicals/OG/sitemap. Switch both to https://slopecurve.com once the
     // domain's nameservers point at Cloudflare.
     "SITE_URL": "https://slopecurve.hamdi708090.workers.dev",
