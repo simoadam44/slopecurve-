@@ -1,0 +1,43 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "slopecurve",
+  "compatibility_date": "2025-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "src/worker.ts",
+
+  // Publish to https://slopecurve.<account>.workers.dev on every deploy.
+  // Attach slopecurve.com as a custom domain in the dashboard (or via `routes` below).
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/**", "!/@vite/**", "!/@react-refresh", "!/@fs/**", "!/src/**", "!/node_modules/**", "!/__/**"]
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "slopecurve-db",
+      // Run `npx wrangler d1 create slopecurve-db` and paste the printed id here.
+      "database_id": "REPLACE_WITH_D1_ID"
+    }
+  ],
+
+  // Optional: serve the Worker on your own domain instead of adding it in the dashboard.
+  // Requires the zone's DNS to be on Cloudflare.
+  // "routes": [{ "pattern": "slopecurve.com", "custom_domain": true }],
+
+  "vars": {
+    // Must match VITE_SITE_URL; both are the public origin used for canonicals/OG/sitemap.
+    "SITE_URL": "https://slopecurve.com",
+    "TRUSTED_GAME_HOSTS": "game-host.example.com,trusted-games.example.com,azgames.io,github.io",
+    "ADS_ENABLED": "false",
+    "ANALYTICS_ENABLED": "false",
+    "ENVIRONMENT": "production",
+    "LOCAL_DEV_AUTH": "false"
+  }
+}
