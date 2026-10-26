@@ -266,6 +266,7 @@ describe("key encryption at rest", () => {
   });
 
   it("validates key format without accepting junk", () => {
+    // Fake fixtures only — never paste a real API key into this file.
     expect(validApiKeyFormat(key)).toBe(true);
     expect(validApiKeyFormat("AQ.FAKE_TEST_KEY_0000000000")).toBe(true);
     expect(validApiKeyFormat("AIzaSyD-Example_LegacyKey_0123456789")).toBe(true);
