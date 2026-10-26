@@ -5,8 +5,9 @@ test("player: placeholder, start hint and reload control are present", async ({ 
 
   const frame = page.locator(".player-wrap iframe").first();
   await expect(frame).toBeVisible();
-  // The placeholder must never sit on top of the game.
-  await expect(page.locator(".player-loading")).toHaveCount(0);
+  // The placeholder must never sit on top of the game. It is cleared on the iframe load event,
+  // which depends on the external game host, so allow a realistic network window.
+  await expect(page.locator(".player-loading")).toHaveCount(0, { timeout: 30_000 });
 
   // Providers such as azgames show their own Play button first; the page says so.
   await expect(page.locator(".player-hint")).toContainText(/Play/);

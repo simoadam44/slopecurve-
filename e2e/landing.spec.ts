@@ -1,8 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { adminHeaders } from "./admin";
 
-const SITE = process.env.SITE_URL || "https://slopecurve.com";
-
 test("admin: keywords & landing tools engine (modal create, publish, view, edit, delete)", async ({ page }) => {
   const stamp = Date.now();
   const slug = `e2e-landing-${stamp}`;
@@ -105,7 +103,10 @@ test("admin: keywords & landing tools engine (modal create, publish, view, edit,
     await expect(meta).toContainText(subtitle);
     await expect(meta).toContainText("Video");
     await expect(page.locator("iframe").first()).toBeVisible();
-    await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", `${SITE}/${slug}`);
+    // Host is deployment-specific; the canonical must be absolute and point at this landing page.
+    const canonicalHref = (await page.locator('link[rel="canonical"]').getAttribute("href")) ?? "";
+    expect(canonicalHref).toMatch(/^https?:\/\//);
+    expect(new URL(canonicalHref).pathname).toBe(`/${slug}`);
     const ld = (await page.locator('script[type="application/ld+json"]').allTextContents()).join(" ");
     expect(ld).toContain('"@type":"VideoGame"');
     expect(ld).toContain('"@type":"FAQPage"');

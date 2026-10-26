@@ -16,7 +16,24 @@ test.describe("Phase 1 SEO fixes (server output)", () => {
     expect(html).toContain('<meta name="robots" content="noindex, follow">');
     expect(html).toContain('<html lang="en">');
     expect(html).not.toMatch(/hreflang/i);
-    expect(html).toContain('<link rel="canonical" href="https://slopecurve.com/games">');
+    // The origin is a deployment setting (workers.dev now, slopecurve.com later), so assert the
+    // shape — one absolute canonical pointing at /games — rather than a specific host.
+    const canonical = html.match(/<link rel="canonical" href="([^"]+)"/)?.[1] ?? "";
+    expect(canonical).toMatch(/^https?:\/\/[^/]+\/games$/);
+    expect(occurrences(html, 'rel="canonical"')).toBe(1);
+  });
+
+  test("page routes stay HTML for clients that do not send Accept: text/html", async ({ request }) => {
+    // Link-preview bots, uptime monitors and plain HTTP clients commonly send `Accept: */*`.
+    const res = await request.get("/", { headers: { Accept: "*/*" } });
+    expect(res.status()).toBe(200);
+    expect(String(res.headers()["content-type"])).toContain("text/html");
+    expect(await res.text()).toContain('rel="canonical"');
+
+    // A URL that is neither a page nor an asset is still a genuine 404.
+    const missing = await request.get("/games/one/two", { headers: { Accept: "*/*" } });
+    expect(missing.status()).toBe(404);
+    expect(String(missing.headers()["content-type"])).toContain("application/json");
   });
 
   test("canonical listing stays indexable with exactly one social tag set", async ({ request }) => {
@@ -61,7 +78,7 @@ test.describe("Phase 1 SEO fixes (server output)", () => {
 
   test("blog article uses og:type=article and one Article block after hydration", async ({ request, page }) => {
     const sitemap = await (await request.get("/sitemap.xml")).text();
-    const postPath = sitemap.match(/<loc>https:\/\/slopecurve\.com(\/blog\/[^<]+)<\/loc>/)?.[1];
+    const postPath = sitemap.match(/<loc>https?:\/\/[^<]*?(\/blog\/[^<]+)<\/loc>/)?.[1];
     expect(postPath, "a published blog post must exist in the sitemap").toBeTruthy();
 
     const res = await request.get(postPath as string, { headers: HTML });

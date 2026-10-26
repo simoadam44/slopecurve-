@@ -1193,11 +1193,17 @@ export default {
     }
     // --- public HTML pages: identical SSR HTML for visitors and crawlers (no UA branching) ---
     // Base shell comes from built assets via the ASSETS binding, so hashed /assets/* paths resolve.
-    if (req.method === "GET" && (req.headers.get("accept") || "").includes("text/html") && !path.startsWith("/api/")) {
+    // A real page route is served as HTML to every client, because link-preview bots, uptime
+    // monitors and plain HTTP clients often send `Accept: */*` — answering them with a JSON 404
+    // would break sharing and monitoring on a page that plainly exists. Only unknown URLs fall
+    // back to JSON, and only for callers that did not ask for HTML.
+    const wantsHtml = (req.headers.get("accept") || "").includes("text/html");
+    if (req.method === "GET" && !path.startsWith("/api/")) {
       const route = resolvePublicRoute(path);
       if (!route) {
         // Known static assets pass through; page-like unknowns get a genuine 404.
         if (isAssetPassthrough(path) && env.ASSETS) return assetPage(env, req, H, path);
+        if (!wantsHtml) return json({ error: "Not found" }, 404, H);
         return htmlPage(env, req, H, { ...notFoundPage(siteUrl(env), "Page"), verifyTags: verifyTags(await settingsMap(env)) || undefined });
       }
       try {

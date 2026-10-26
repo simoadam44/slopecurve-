@@ -12,7 +12,10 @@ test("legal: pages render with metadata, footer links and direct refresh", async
     await expect(page).toHaveTitle(p.title);
     await expect(page.locator("h1")).toHaveText(p.h1);
     await expect(page.getByRole("heading", { name: p.heading })).toBeVisible();
-    await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", `https://slopecurve.com${p.path}`);
+    // Host is deployment-specific; the canonical must still be absolute and point at this page.
+    const canonicalHref = (await page.locator('link[rel="canonical"]').getAttribute("href")) ?? "";
+    expect(canonicalHref).toMatch(/^https?:\/\//);
+    expect(new URL(canonicalHref).pathname).toBe(p.path);
     const robots = await page.locator('meta[name="robots"]').count();
     expect(robots).toBe(0);
 
