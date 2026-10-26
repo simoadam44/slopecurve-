@@ -63,7 +63,7 @@ change **both** to `https://slopecurve.com` and redeploy.
 
 ## Local development
 ```bash
-git clone https://github.com/<your-account>/slopecurve.git
+git clone https://github.com/simoadam44/slopecurve-.git
 cd slopecurve
 npm ci
 
@@ -154,13 +154,18 @@ Alternatively uncomment the `routes` entry in `wrangler.jsonc`:
 Then set `SITE_URL` and `VITE_SITE_URL` to `https://slopecurve.com`, rebuild and redeploy.
 
 ## Push to GitHub
+Already pushed: `https://github.com/simoadam44/slopecurve-` (branch `main`, CI green).
+For a fresh clone:
 ```bash
-# from the project folder (repository already initialised)
-git remote add origin https://github.com/<your-account>/slopecurve.git
-git branch -M main
+git clone https://github.com/simoadam44/slopecurve-.git
+```
+To re-point an existing checkout:
+```bash
+git remote set-url origin https://github.com/simoadam44/slopecurve-.git
 git push -u origin main
 ```
 Never commit `.dev.vars`, `.env*`, `node_modules/`, `dist/` or `.wrangler/` — they are git-ignored.
+`.env.production` is committed on purpose: it only holds the public site origin.
 
 ## Admin access (Cloudflare Access) — the one remaining step
 Admin routes are already **fail-closed**: `/api/admin/*` returns `401` until all three vars exist,

@@ -33,6 +33,7 @@
 - Auth: Cloudflare Access JWT only (`cf-access-jwt-assertion`, team domain + AUD + allowlisted email). Local dev bypass requires `ENVIRONMENT!=="production"`, `LOCAL_DEV_AUTH=true`, and a localhost host. Admin mutations also require same-origin + a subject-bound CSRF token.
 - Never commit secrets; configure `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, `ADMIN_EMAILS`, `CSRF_SECRET`, and `AI_KEYS_SECRET` in the deployment environment. There is no app password/login store.
 - Gemini keys: encrypt at rest (AES-GCM from dedicated `AI_KEYS_SECRET`), only expose a masked hint, allowlist verified free model ids server-side, cap daily requests, and surface normalized error codes (never log/return raw provider responses). Never trust a client-supplied model id.
+- Test fixtures must never contain a real credential: use obviously fake values (`AQ.FAKE_TEST_KEY_…`, `AIzaSyTESTONLY_…`). GitHub push protection blocks the push otherwise — and it is right to.
 
 ## SEO
 - Per-page title/desc/canonical/OG/Twitter, H1, breadcrumbs, JSON-LD matching visible content.
