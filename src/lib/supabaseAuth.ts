@@ -103,6 +103,27 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
+function decodeBase64Url(value: string): string {
+  const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
+  return atob(base64 + "=".repeat((4 - (base64.length % 4)) % 4));
+}
+
+/**
+ * Reads `alg` from a JWT header without trusting anything else. Used to decide whether a
+ * token could ever be verified locally, so an unverifiable token is not forwarded to
+ * Supabase on every request. Returns "" for anything that is not a readable JWS.
+ */
+export function tokenAlgorithm(token: string): string {
+  const parts = String(token || "").split(".");
+  if (parts.length !== 3) return "";
+  try {
+    const header = JSON.parse(decodeBase64Url(parts[0])) as { alg?: unknown };
+    return typeof header?.alg === "string" ? header.alg : "";
+  } catch {
+    return "";
+  }
+}
+
 function supportedAlgorithms(config: SupabaseAuthConfig): string[] {
   return [...(config.jwtSecret ? ["HS256"] : []), "RS256", "ES256"];
 }

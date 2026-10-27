@@ -7,6 +7,7 @@ import {
   parseEmailList,
   profileRoleIsAdmin,
   supabaseAuthConfig,
+  tokenAlgorithm,
   verifySupabaseToken,
   type SupabaseAuthConfig,
   type SupabaseIdentity,
@@ -111,6 +112,33 @@ describe("Supabase access token verification", () => {
       .sign(rsaPrivate);
     const identity = await verifySupabaseToken(token, config(), rsaPublic);
     expect(identity?.sub).toBe("user-2");
+  });
+
+  it("verifies an ES256 token without any shared JWT secret (current Supabase default)", async () => {
+    const pair = await generateKeyPair("ES256");
+    const now = Math.floor(Date.now() / 1000);
+    const token = await new SignJWT({ email: "admin@example.com", app_metadata: { role: "admin" } })
+      .setProtectedHeader({ alg: "ES256" })
+      .setIssuer(ISSUER)
+      .setAudience("authenticated")
+      .setSubject("user-3")
+      .setIssuedAt(now)
+      .setExpirationTime(now + 300)
+      .sign(pair.privateKey);
+    const identity = await verifySupabaseToken(token, config({ jwtSecret: null, anonKey: "pub" }), pair.publicKey);
+    expect(identity?.sub).toBe("user-3");
+    expect(identity && isAdminIdentity(identity, config({ jwtSecret: null, anonKey: "pub" }))).toBe(true);
+    // A different key must not verify.
+    const other = await generateKeyPair("ES256");
+    expect(await verifySupabaseToken(token, config({ jwtSecret: null, anonKey: "pub" }), other.publicKey)).toBeNull();
+  });
+
+  it("classifies a token header so unverifiable tokens are not forwarded upstream", () => {
+    expect(tokenAlgorithm("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1In0.sig")).toBe("HS256");
+    expect(tokenAlgorithm("eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJ1In0.sig")).toBe("ES256");
+    expect(tokenAlgorithm("not.a.jwt")).toBe("");
+    expect(tokenAlgorithm("garbage")).toBe("");
+    expect(tokenAlgorithm("")).toBe("");
   });
 
   it("rejects wrong issuer, wrong audience, expiry and a forged signature", async () => {

@@ -20,8 +20,8 @@ import { homeGameSlug } from "./lib/home";
 import { legalPage } from "./lib/legal";
 import { sanitizeRichText as sanitizeHtml } from "./lib/sanitize";
 import { cacheControlFor, isAdminPath, isAssetPassthrough, securityHeaders } from "./lib/security";
-import { fetchSupabaseUser, isAdminIdentity, normalizeSupabaseUrl, profileRoleIsAdmin, supabaseAuthConfig, verifySupabaseToken } from "./lib/supabaseAuth";
-import type { SupabaseAuthConfig } from "./lib/supabaseAuth";
+import { fetchSupabaseUser, isAdminIdentity, normalizeSupabaseUrl, profileRoleIsAdmin, supabaseAuthConfig, tokenAlgorithm, verifySupabaseToken } from "./lib/supabaseAuth";
+import type { SupabaseAuthConfig, SupabaseIdentity } from "./lib/supabaseAuth";
 import { issueCsrfToken, verifyCsrfToken } from "./lib/csrf";
 import { DEFAULT_JSON_LIMIT, bearerToken, isJsonRequest, isSameOrigin, readJson } from "./lib/request";
 import { createRateLimiter } from "./lib/rateLimit";
@@ -154,6 +154,21 @@ async function profileAdmin(config: SupabaseAuthConfig, sub: string): Promise<bo
 }
 
 /**
+ * Verifies a Supabase session token and returns its identity.
+ *
+ * Local verification is always attempted first: HS256 with `SUPABASE_JWT_SECRET`, or the
+ * project's asymmetric signing keys through JWKS (Supabase's current default is ES256, which
+ * needs no shared secret at all). Only an HS256 token on a project without a JWT secret is
+ * sent to `GET /auth/v1/user`, so a normal deployment makes zero extra calls per request.
+ */
+async function verifyIdentity(token: string, config: SupabaseAuthConfig): Promise<SupabaseIdentity | null> {
+  const local = await verifySupabaseToken(token, config);
+  if (local) return local;
+  if (!config.jwtSecret && tokenAlgorithm(token) === "HS256") return fetchSupabaseUser(token, config);
+  return null;
+}
+
+/**
  * Accepts a request only when it carries a valid Supabase session belonging to an
  * administrator. Returns the reason on failure so /api/admin/me can explain it.
  */
@@ -162,9 +177,7 @@ async function requireAdmin(req: Request, env: Env): Promise<AdminAuth> {
   const config = supabaseAuthConfig(env);
   const token = bearerToken(req);
   if (!config || !token) return { ok: false, reason: "unauthorized" };
-  const identity = config.jwtSecret
-    ? await verifySupabaseToken(token, config)
-    : await fetchSupabaseUser(token, config);
+  const identity = await verifyIdentity(token, config);
   if (!identity) return { ok: false, reason: "unauthorized" };
   if (isAdminIdentity(identity, config) || (await profileAdmin(config, identity.sub))) {
     return { ok: true, principal: { sub: identity.sub, email: identity.email } };

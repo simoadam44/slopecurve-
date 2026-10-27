@@ -53,8 +53,9 @@ D1 create → migrations → secrets → build → deploy → domain → verify 
 Current state (2026-10-26): Worker `slopecurve` is live at `https://slopecurve.hamdi708090.workers.dev`
 on account `a2cf8c46059a89fb2534486b47b6e05e`; D1 `slopecurve-db` (`3aa5cb41-323e-4399-bb02-cad56f322964`,
 WEUR) has all 6 migrations and the 8 games + 6 categories + 2 posts + settings. `CSRF_SECRET` and
-`AI_KEYS_SECRET` are set. Cloudflare Access has been **removed** in favour of Supabase Auth; no
-Supabase project/credentials are configured yet, so `/api/admin/*` returns 401 (fail-closed) and the
-CMS stays unreachable until `SUPABASE_URL` + `SUPABASE_JWT_SECRET` are set. `slopecurve.com` still
-points at Namecheap nameservers and is not attached to the Worker. The legacy `ACCESS_TEAM_DOMAIN`,
-`ACCESS_AUD` and `ADMIN_EMAILS` secrets can be deleted with `wrangler secret delete`.
+`AI_KEYS_SECRET` are set, plus `SUPABASE_URL` and `SUPABASE_ANON_KEY`; the public build values
+`VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` live in `.env.production`. Cloudflare Access has been
+**removed** in favour of Supabase Auth (project `lvwjuqsmniktvjmyornp`, ES256 signing → tokens are
+verified locally against JWKS, so `SUPABASE_JWT_SECRET` is not required). The project currently has
+**no users**, so `/api/admin/*` still returns 401 until an administrator is created and granted the
+role. `slopecurve.com` still points at Namecheap nameservers and is not attached to the Worker.

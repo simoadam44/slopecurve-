@@ -9,7 +9,7 @@ Lightweight browser gaming portal: React + Vite + Cloudflare Workers Static Asse
 | Worker | `slopecurve` (account `a2cf8c46059a89fb2534486b47b6e05e`) |
 | D1 database | `slopecurve-db` → `3aa5cb41-323e-4399-bb02-cad56f322964` (WEUR) |
 | Secrets set | `CSRF_SECRET`, `AI_KEYS_SECRET` |
-| Admin auth | Supabase Auth (email + password) — needs `SUPABASE_URL`, `SUPABASE_JWT_SECRET`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`; `/admin` stays **fail-closed** until they exist |
+| Admin auth | Supabase Auth (email + password). Worker has `SUPABASE_URL` + `SUPABASE_ANON_KEY`; build has `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`. Tokens are verified against the project's JWKS (ES256), so no shared JWT secret is needed |
 | Custom domain | `slopecurve.com` still uses Namecheap nameservers; not attached |
 
 `.env.production` (committed, public values only) sets `VITE_SITE_URL`, and `vars.SITE_URL`
@@ -91,9 +91,9 @@ Runtime vars live in `wrangler.jsonc` (`vars`), secrets are set once on the Work
 | `SITE_URL` | var — `wrangler.jsonc` | Public origin used by the Worker for canonical / OG / sitemap URLs |
 | `VITE_SITE_URL` | build env | **Same origin**, baked into the client bundle at build time |
 | `TRUSTED_GAME_HOSTS` | var | Comma list of hosts allowed in the player iframe (`azgames.io`, `github.io`, …) |
-| `SUPABASE_URL` | secret | Supabase project origin, e.g. `https://abcdefgh.supabase.co` (also added to `connect-src` in CSP) |
-| `SUPABASE_JWT_SECRET` | secret | Verifies session tokens locally (Settings → API → JWT Settings). Preferred: no per-request network call |
-| `SUPABASE_ANON_KEY` | optional secret | Public key; only needed to verify tokens through `GET /auth/v1/user` when no JWT secret is set |
+| `SUPABASE_URL` | **secret, required** | Supabase project origin, e.g. `https://abcdefgh.supabase.co` (also added to `connect-src` in CSP) |
+| `SUPABASE_ANON_KEY` | secret, recommended | Public key; used for the `GET /auth/v1/user` fallback. Asymmetric (ES256) tokens are verified locally through JWKS with no key at all |
+| `SUPABASE_JWT_SECRET` | optional secret | Only for legacy **HS256** projects (Settings → API → JWT Settings). Supabase's current default is ES256, which needs no shared secret |
 | `SUPABASE_SERVICE_ROLE_KEY` | optional secret | Enables the authoritative `profiles.role = 'admin'` lookup. Never sent to the browser |
 | `SUPABASE_ADMIN_EMAILS` | optional secret | Comma-separated bootstrap allowlist of administrator emails |
 | `SUPABASE_TRUST_USER_METADATA` | optional var | Leave unset. `true` also accepts `user_metadata.role` — **user-writable in Supabase**, so only for a throwaway setup |
@@ -132,11 +132,11 @@ npm run db:apply:remote   # production schema — run once, then after new migra
    npx wrangler secret put CSRF_SECRET
    npx wrangler secret put AI_KEYS_SECRET
    npx wrangler secret put SUPABASE_URL
-   npx wrangler secret put SUPABASE_JWT_SECRET
-   # optional but recommended:
    npx wrangler secret put SUPABASE_ANON_KEY
+   # optional:
    npx wrangler secret put SUPABASE_ADMIN_EMAILS
    # optional: npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+   # optional (HS256 projects only): npx wrangler secret put SUPABASE_JWT_SECRET
    # optional: npx wrangler secret put GEMINI_API_KEY
    ```
    The two public build values must also exist for the browser bundle:
@@ -179,11 +179,15 @@ Never commit `.dev.vars`, `.env*`, `node_modules/`, `dist/` or `.wrangler/` — 
 `.env.production` is committed on purpose: it only holds the public site origin.
 
 ## Admin access (Supabase Auth)
-Admin routes are **fail-closed**: `/api/admin/*` returns `401` until `SUPABASE_URL` and a
-verification key exist, so the CMS cannot be reached without a real Supabase session.
+Admin routes are **fail-closed**: `/api/admin/*` returns `401` until `SUPABASE_URL` exists, so the
+CMS cannot be reached without a real Supabase session. Session tokens are verified locally: an
+asymmetric token (Supabase's default **ES256**) against the project's JWKS — no secret needed — or
+an **HS256** token against `SUPABASE_JWT_SECRET`. Only an HS256 token on a keyless project is sent
+to `GET /auth/v1/user`, and only when `SUPABASE_ANON_KEY` is set.
 
 1. Create a project at <https://supabase.com/dashboard>. From **Settings -> API** copy the
-   **Project URL**, the **anon public** key, and the **JWT Secret** (JWT Settings).
+   **Project URL** and the public **publishable / anon** key. Older HS256 projects also have a
+   **JWT Secret** under JWT Settings; projects on the new asymmetric keys do not need it.
 2. Create the administrator: **Authentication -> Users -> Add user** (email + password,
    confirm the email if confirmations are on).
 3. Grant the administrator role - any one of these works:
@@ -203,10 +207,10 @@ verification key exist, so the CMS cannot be reached without a real Supabase ses
 4. Set the Worker secrets:
    ```bash
    npx wrangler secret put SUPABASE_URL              # https://<project-ref>.supabase.co
-   npx wrangler secret put SUPABASE_JWT_SECRET       # Settings -> API -> JWT Settings
-   npx wrangler secret put SUPABASE_ANON_KEY         # optional (remote verify fallback)
+   npx wrangler secret put SUPABASE_ANON_KEY         # public key; enables the remote verify fallback
    npx wrangler secret put SUPABASE_ADMIN_EMAILS     # optional bootstrap allowlist
    # optional: npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+   # optional, HS256 projects only: npx wrangler secret put SUPABASE_JWT_SECRET
    ```
 5. Give the browser build the same public project values, then rebuild and deploy:
    ```bash
@@ -215,7 +219,8 @@ verification key exist, so the CMS cannot be reached without a real Supabase ses
    VITE_SUPABASE_ANON_KEY=<anon public key>
    npm run deploy
    ```
-6. Remove the old Cloudflare Access secrets from the Worker:
+6. Remove the old Cloudflare Access secrets if the Worker still lists them
+   (`npx wrangler secret list`):
    ```bash
    npx wrangler secret delete ACCESS_TEAM_DOMAIN
    npx wrangler secret delete ACCESS_AUD
