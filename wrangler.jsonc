@@ -31,6 +31,13 @@
   // Requires the zone's DNS to be on Cloudflare.
   // "routes": [{ "pattern": "slopecurve.com", "custom_domain": true }],
 
+  // Admin authentication uses Supabase Auth. Set these with `wrangler secret put`:
+  //   SUPABASE_URL                https://<project-ref>.supabase.co
+  //   SUPABASE_JWT_SECRET         Settings -> API -> JWT Settings -> JWT Secret
+  //   SUPABASE_ANON_KEY           optional; lets the Worker verify tokens remotely
+  //   SUPABASE_SERVICE_ROLE_KEY   optional; enables the profiles.role admin lookup
+  //   SUPABASE_ADMIN_EMAILS       optional bootstrap allowlist (comma separated)
+  //   SUPABASE_TRUST_USER_METADATA  leave unset; "true" also accepts user_metadata.role
   "vars": {
     // Must match .env.production -> VITE_SITE_URL; both are the public origin used
     // for canonicals/OG/sitemap. Switch both to https://slopecurve.com once the

@@ -5,6 +5,7 @@ import { slugify } from "../../lib/validate";
 import { DEFAULT_HOME_GAME } from "../../lib/home";
 import { adminFetch, setAdminCsrfToken } from "../../lib/adminApi";
 import { adminLoginHref, currentAdminNext } from "../../lib/adminRoute";
+import { signOutAdmin } from "../../lib/supabase";
 
 async function me(): Promise<boolean> {
   try {
@@ -14,6 +15,24 @@ async function me(): Promise<boolean> {
     if (data.csrf) setAdminCsrfToken(data.csrf);
     return true;
   } catch { return false; }
+}
+
+/** Ends the Supabase session in this browser and returns to the sign-in page. */
+function AdminLogout({ label = "Log out" }: { label?: string }) {
+  const navigate = useNavigate();
+  return (
+    <button
+      className="btn-secondary btn"
+      type="button"
+      onClick={async () => {
+        await signOutAdmin();
+        setAdminCsrfToken("");
+        navigate("/admin/login", { replace: true });
+      }}
+    >
+      {label}
+    </button>
+  );
 }
 
 export function RequireAuth({ children }: { children: JSX.Element }) {
@@ -64,7 +83,7 @@ export function AdminLayout() {
       <button className="btn-secondary btn" style={{ display: "none" }} aria-hidden="true" />
       <div style={{ display: "flex", gap: 8, gridColumn: "1 / -1" }}>
         <button className="btn-secondary btn" onClick={() => setOpen(!open)} aria-label="Toggle admin menu">☰ Menu</button>
-        <a className="btn-secondary btn" href="/cdn-cgi/access/logout">Logout</a>
+        <AdminLogout />
       </div>
       <aside aria-label="Admin sections" style={{ display: open ? "block" : undefined }} className="card admin-side">
         <nav style={{ display: "grid", gap: 2, padding: 8 }}>
@@ -463,8 +482,11 @@ export function AccountAdmin() {
   return (
     <div>
       <h2>Account</h2>
-      <p>Sign-in, passwords, and sessions are managed by Cloudflare Access. Use the Access portal to switch accounts or end your session.</p>
-      <a className="btn-secondary btn" href="/cdn-cgi/access/logout">Sign out of Access</a>
+      <p>
+        Sign-in is handled by Supabase Auth with your email address and password. Accounts are created and
+        managed in the Supabase dashboard (Authentication → Users); this site never stores your password.
+      </p>
+      <AdminLogout label="Sign out" />
     </div>
   );
 }
@@ -474,12 +496,13 @@ export function SecurityAdmin() {
     <div>
       <h2>Security</h2>
       <ul>
-        <li>Admin access is enforced by Cloudflare Access; every <code>/api/admin/*</code> request is rejected without a valid Access JWT for an allowlisted email.</li>
-        <li>Mutating admin requests require a same-origin context plus a short-lived CSRF token bound to the signed-in subject.</li>
+        <li>Admin access is enforced by Supabase Auth; every <code>/api/admin/*</code> request is rejected unless it carries a valid Supabase session belonging to an administrator.</li>
+        <li>Administrator status comes from a trusted server-side source only: the <code>SUPABASE_ADMIN_EMAILS</code> allowlist, <code>app_metadata.role</code>, or a <code>profiles.role</code> row. The top-level Supabase <code>role</code> claim is the Postgres role and is never treated as an admin flag.</li>
+        <li>Mutating admin requests require a same-origin context plus a short-lived CSRF token bound to the signed-in subject on top of the Bearer session token.</li>
         <li>Comments are limited to 5 per minute per IP in-process; production abuse controls should also be configured at the Cloudflare edge.</li>
-        <li>robots.txt is not access control — admin routes stay behind Access.</li>
+        <li>robots.txt is not access control — admin routes stay behind authentication, and <code>/api/admin/*</code> never trusts the client.</li>
       </ul>
-      <a className="btn-secondary btn" href="/cdn-cgi/access/logout">Log out now</a>
+      <AdminLogout label="Log out now" />
     </div>
   );
 }

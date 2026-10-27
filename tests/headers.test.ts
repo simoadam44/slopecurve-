@@ -25,6 +25,19 @@ describe("security headers", () => {
     expect(local["Content-Security-Policy"]).toMatch(/script-src[^;]*unsafe-inline/);
     expect(local["Strict-Transport-Security"]).toBeUndefined();
   });
+
+  it("adds the Supabase origin to connect-src so admin sign-in is not blocked by CSP", () => {
+    const h = securityHeaders(SITE, ["azgames.io"], false, ["https://abcdefgh.supabase.co"]);
+    const csp = h["Content-Security-Policy"];
+    expect(csp).toContain("connect-src 'self' https://abcdefgh.supabase.co;");
+    // Still strict: scripts stay same-origin only.
+    expect(csp).toMatch(/script-src 'self'(;| )/);
+  });
+
+  it("keeps connect-src self-only when no extra origin is configured", () => {
+    const csp = securityHeaders(SITE, [], false)["Content-Security-Policy"];
+    expect(csp).toContain("connect-src 'self';");
+  });
 });
 
 describe("cache policy", () => {

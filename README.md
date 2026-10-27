@@ -9,7 +9,7 @@ Lightweight browser gaming portal: React + Vite + Cloudflare Workers Static Asse
 | Worker | `slopecurve` (account `a2cf8c46059a89fb2534486b47b6e05e`) |
 | D1 database | `slopecurve-db` → `3aa5cb41-323e-4399-bb02-cad56f322964` (WEUR) |
 | Secrets set | `CSRF_SECRET`, `AI_KEYS_SECRET` |
-| Not configured yet | `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, `ADMIN_EMAILS` → `/admin` is **fail-closed** (API returns 401) until Cloudflare Access exists |
+| Admin auth | Supabase Auth (email + password) — needs `SUPABASE_URL`, `SUPABASE_JWT_SECRET`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`; `/admin` stays **fail-closed** until they exist |
 | Custom domain | `slopecurve.com` still uses Namecheap nameservers; not attached |
 
 `.env.production` (committed, public values only) sets `VITE_SITE_URL`, and `vars.SITE_URL`
@@ -19,14 +19,14 @@ change **both** to `https://slopecurve.com` and redeploy.
 
 ## Features
 - Public: home, games, game detail with safe iframe embed, categories, new/hot, blog/guides, search, comments (moderated).
-- Admin `/admin`: Cloudflare Access protected, overview counts, games CRUD (draft/published/featured/new/hot/archived), categories, comments moderation, blog/guides, AI Writer, settings.
+- Admin `/admin`: Supabase Auth (email + password) protected, overview counts, games CRUD (draft/published/featured/new/hot/archived), categories, comments moderation, blog/guides, AI Writer, settings.
 - SEO: unique titles/descriptions, canonical, OG/Twitter, breadcrumbs, JSON-LD (VideoGame/Article/BreadcrumbList), sitemap.xml, robots.txt. No fake ratings/stats.
-- Security: Cloudflare Access JWT on every admin API, same-origin + CSRF checks on admin mutations, allowlisted game hosts, HTTPS, sandboxed iframes (`allow-same-origin`, never our own origin), sanitized rich text, bounded comment rate limits.
+- Security: Supabase session token on every admin API, admin-role check on the server, same-origin + CSRF checks on admin mutations, allowlisted game hosts, HTTPS, sandboxed iframes (`allow-same-origin`, never our own origin), sanitized rich text, bounded comment rate limits.
 
 ## Admin CMS (new)
 - Sidebar: Overview, Games, Categories, Blog, AI Writer, Comments, Branding, General, SEO, Webmaster, AdSense, Account, Security.
 - Games: create/edit/preview/publish/unpublish/delete, full SEO fields (focus/related/OG/canonical/noindex), image preview + fallback.
-- Accounts: sign-in, passwords, and sessions are managed in Cloudflare Access; the app stores no admin passwords or session cookies.
+- Accounts: sign-in is Supabase Auth (email + password); administrator status is decided server-side. The app stores no admin password and no session cookie — the Supabase session token lives in the browser and is sent as a Bearer token.
 - Settings in D1 `site_settings`; public-safe subset at `GET /api/settings`. Branding updates Header/Footer live.
 - AdSense: units in D1, disabled by default, `ca-pub-…` validated, placeholders only, `ads.txt` served at `/ads.txt`.
 - Webmaster: token-only fields, escaped meta tags in crawler HTML, setup instructions (saving ≠ verification).
@@ -58,7 +58,7 @@ change **both** to `https://slopecurve.com` and redeploy.
 | Frontend | React 18, Vite 6, TypeScript (strict), React Router, plain CSS |
 | API + SSR | Single Cloudflare Worker (`src/worker.ts`) with Static Assets |
 | Database | Cloudflare D1 (`migrations/0001…0006`) |
-| Auth | Cloudflare Access (Zero Trust) JWT — no app password store |
+| Auth | Supabase Auth (email + password) — `@supabase/supabase-js` in the browser, JWT verified in the Worker |
 | Tests | Vitest (unit) + Playwright (e2e) |
 
 ## Local development
@@ -91,8 +91,14 @@ Runtime vars live in `wrangler.jsonc` (`vars`), secrets are set once on the Work
 | `SITE_URL` | var — `wrangler.jsonc` | Public origin used by the Worker for canonical / OG / sitemap URLs |
 | `VITE_SITE_URL` | build env | **Same origin**, baked into the client bundle at build time |
 | `TRUSTED_GAME_HOSTS` | var | Comma list of hosts allowed in the player iframe (`azgames.io`, `github.io`, …) |
-| `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, `ADMIN_EMAILS` | var/secret | Cloudflare Access team domain, app AUD tag, allowed admin emails |
-| `CSRF_SECRET` | secret, 32+ chars | Signs admin CSRF tokens |
+| `SUPABASE_URL` | secret | Supabase project origin, e.g. `https://abcdefgh.supabase.co` (also added to `connect-src` in CSP) |
+| `SUPABASE_JWT_SECRET` | secret | Verifies session tokens locally (Settings → API → JWT Settings). Preferred: no per-request network call |
+| `SUPABASE_ANON_KEY` | optional secret | Public key; only needed to verify tokens through `GET /auth/v1/user` when no JWT secret is set |
+| `SUPABASE_SERVICE_ROLE_KEY` | optional secret | Enables the authoritative `profiles.role = 'admin'` lookup. Never sent to the browser |
+| `SUPABASE_ADMIN_EMAILS` | optional secret | Comma-separated bootstrap allowlist of administrator emails |
+| `SUPABASE_TRUST_USER_METADATA` | optional var | Leave unset. `true` also accepts `user_metadata.role` — **user-writable in Supabase**, so only for a throwaway setup |
+| `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` | build env | Public values baked into the client bundle; needed for the sign-in form |
+| `CSRF_SECRET` | secret, 32+ chars | Signs admin CSRF tokens in addition to the Bearer session token |
 | `AI_KEYS_SECRET` | secret, 32+ chars | AES-GCM key for the encrypted Gemini keyring (changing it requires re-entering keys) |
 | `GEMINI_API_KEY` | optional secret | Server-side Gemini key; takes priority over keys stored in D1 |
 | `ADS_ENABLED`, `ANALYTICS_ENABLED` | var | `false` by default |
@@ -125,11 +131,16 @@ npm run db:apply:remote   # production schema — run once, then after new migra
    ```bash
    npx wrangler secret put CSRF_SECRET
    npx wrangler secret put AI_KEYS_SECRET
-   npx wrangler secret put ACCESS_TEAM_DOMAIN
-   npx wrangler secret put ACCESS_AUD
-   npx wrangler secret put ADMIN_EMAILS
+   npx wrangler secret put SUPABASE_URL
+   npx wrangler secret put SUPABASE_JWT_SECRET
+   # optional but recommended:
+   npx wrangler secret put SUPABASE_ANON_KEY
+   npx wrangler secret put SUPABASE_ADMIN_EMAILS
+   # optional: npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
    # optional: npx wrangler secret put GEMINI_API_KEY
    ```
+   The two public build values must also exist for the browser bundle:
+   `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (add them as build variables or in `.env.production`).
 5. Apply migrations: `npm run db:apply:remote`.
 6. First deploy URL: `https://slopecurve.hamdi708090.workers.dev` (`workers_dev` is enabled in `wrangler.jsonc`).
 
@@ -167,17 +178,56 @@ git push -u origin main
 Never commit `.dev.vars`, `.env*`, `node_modules/`, `dist/` or `.wrangler/` — they are git-ignored.
 `.env.production` is committed on purpose: it only holds the public site origin.
 
-## Admin access (Cloudflare Access) — the one remaining step
-Admin routes are already **fail-closed**: `/api/admin/*` returns `401` until all three vars exist,
-so the CMS cannot be reached at all right now. To enable it:
-1. Zero Trust → Access → Applications → **Add a self-hosted application**:
-   - `slopecurve.hamdi708090.workers.dev` path `admin`
-   - `slopecurve.hamdi708090.workers.dev` path `api/admin`
-2. Add an **Allow** policy with the email(s) you put in `ADMIN_EMAILS`.
-3. Copy each application's **Audience (AUD) tag** into `ACCESS_AUD`, and set
-   `ACCESS_TEAM_DOMAIN=https://<team>.cloudflareaccess.com`.
-4. Open `/admin/login` — it verifies the Access session and continues to the dashboard.
-   There is no site password and no password reset inside the app.
+## Admin access (Supabase Auth)
+Admin routes are **fail-closed**: `/api/admin/*` returns `401` until `SUPABASE_URL` and a
+verification key exist, so the CMS cannot be reached without a real Supabase session.
+
+1. Create a project at <https://supabase.com/dashboard>. From **Settings -> API** copy the
+   **Project URL**, the **anon public** key, and the **JWT Secret** (JWT Settings).
+2. Create the administrator: **Authentication -> Users -> Add user** (email + password,
+   confirm the email if confirmations are on).
+3. Grant the administrator role - any one of these works:
+   - **Recommended:** in the SQL editor, set the server-only claim:
+     ```sql
+     update auth.users
+        set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"role":"admin"}'::jsonb
+      where email = 'you@example.com';
+     ```
+   - Put the address in `SUPABASE_ADMIN_EMAILS`.
+   - Or keep a `profiles` table (`id uuid primary key references auth.users`, `role text`)
+     with `role = 'admin'` and set `SUPABASE_SERVICE_ROLE_KEY` so the Worker can read it.
+   - `user_metadata` is **not** trusted by default because a signed-in user can write it.
+     `SUPABASE_TRUST_USER_METADATA=true` re-enables it; do not use that in production.
+   After editing `app_metadata`, sign out and back in (or wait for the token refresh) so the
+   new claim appears in the session token.
+4. Set the Worker secrets:
+   ```bash
+   npx wrangler secret put SUPABASE_URL              # https://<project-ref>.supabase.co
+   npx wrangler secret put SUPABASE_JWT_SECRET       # Settings -> API -> JWT Settings
+   npx wrangler secret put SUPABASE_ANON_KEY         # optional (remote verify fallback)
+   npx wrangler secret put SUPABASE_ADMIN_EMAILS     # optional bootstrap allowlist
+   # optional: npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+   ```
+5. Give the browser build the same public project values, then rebuild and deploy:
+   ```bash
+   # .env.production (or Workers Builds build variables)
+   VITE_SUPABASE_URL=https://<project-ref>.supabase.co
+   VITE_SUPABASE_ANON_KEY=<anon public key>
+   npm run deploy
+   ```
+6. Remove the old Cloudflare Access secrets from the Worker:
+   ```bash
+   npx wrangler secret delete ACCESS_TEAM_DOMAIN
+   npx wrangler secret delete ACCESS_AUD
+   npx wrangler secret delete ADMIN_EMAILS
+   ```
+7. Open `/admin` (or `/admin/login`): the email + password form appears, and the session
+   survives a reload. A valid login without the admin role is signed out again with a clear
+   message instead of landing in a redirect loop.
+
+`GET /api/admin/me` is the single source of truth the dashboard asks on load:
+`200` = signed-in administrator, `401` = no/invalid session, `403 not_admin` = a valid
+Supabase session without the administrator role.
 
 ## Post-deploy checklist
 ```bash
@@ -187,7 +237,7 @@ curl -s   https://<origin>/robots.txt            # sitemap line
 curl -sI https://<origin>/does-not-exist | head -n 1   # 404 + noindex
 ```
 - `/`, `/games`, `/games/snow-road`, `/categories`, `/blog` render with correct titles.
-- `/admin` asks for Access login, then shows the dashboard.
+- `/admin` asks for the Supabase email + password, then shows the dashboard.
 - Create a draft game, publish it, confirm it appears in the listing and the sitemap.
 - Add one Gemini key in Admin → AI Writer (optional) and confirm `GEMINI_API_KEY`/keyring works.
 

@@ -23,24 +23,53 @@ test("admin: deep link keeps the target after sign-in", async ({ page }) => {
   await expect(page.getByRole("heading", { name: /Games/i }).first()).toBeVisible();
 });
 
-test("admin: signed-out visitors get the login page instead of a dead end", async ({ page }) => {
+test("admin: signed-out visitors get the email + password form, not a dead end", async ({ page }) => {
   await page.route("**/api/admin/me", (route) =>
-    route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ error: "Unauthorized" }) }),
+    route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ error: "Unauthorized", code: "unauthorized" }) }),
   );
 
   await page.goto("/admin/games");
   await expect(page).toHaveURL(/\/admin\/login\?next=%2Fadmin%2Fgames/);
   await expect(page.getByRole("heading", { name: "Admin sign in" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Continue with Cloudflare Access" })).toHaveAttribute(
-    "href",
-    /cdn-cgi\/access\/login\?redirect_url=%2Fadmin%2Fgames/,
-  );
 
-  // The app has no password store, so no credential form is offered.
-  await expect(page.locator('input[type="password"]')).toHaveCount(0);
-  await expect(page.locator('input[type="email"]')).toHaveCount(0);
+  // Supabase Auth is an ordinary email + password form; no hosted identity provider redirect.
+  const email = page.getByLabel("Email", { exact: true });
+  const password = page.getByLabel("Password", { exact: true });
+  await expect(email).toHaveAttribute("type", "email");
+  await expect(email).toHaveAttribute("autocomplete", "username");
+  await expect(password).toHaveAttribute("type", "password");
+  await expect(password).toHaveAttribute("autocomplete", "current-password");
+  await expect(page.getByRole("button", { name: /sign in/i })).toBeVisible();
+
+  // The old Cloudflare Access redirect must be gone entirely.
+  await expect(page.locator('a[href*="cdn-cgi/access"]')).toHaveCount(0);
+  await expect(page.locator("body")).not.toContainText("Cloudflare Access");
 
   // Reloading the login URL must not 404 either.
   await page.reload();
   await expect(page.getByRole("heading", { name: "Admin sign in" })).toBeVisible();
+});
+
+test("admin: a rejected sign-in shows a friendly error and stays on the page", async ({ page }) => {
+  await page.route("**/api/admin/me", (route) =>
+    route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ error: "Unauthorized" }) }),
+  );
+
+  await page.goto("/admin/login");
+  const email = page.getByLabel("Email", { exact: true });
+  const password = page.getByLabel("Password", { exact: true });
+  const submit = page.getByRole("button", { name: /sign in/i });
+
+  // Without Supabase build config the form refuses to pretend: the button is disabled and
+  // the page says why. With config, an invalid pair must produce a readable message.
+  if (await submit.isDisabled()) {
+    await expect(page.getByText(/no Supabase configuration/i)).toBeVisible();
+    return;
+  }
+
+  await email.fill("nobody@example.com");
+  await password.fill("definitely-not-the-password");
+  await submit.click();
+  await expect(page.getByRole("alert")).toContainText(/wrong email or password|sign-in failed|not an administrator/i);
+  await expect(page).toHaveURL(/\/admin\/login/);
 });

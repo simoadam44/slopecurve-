@@ -20,10 +20,10 @@ import { homeGameSlug } from "./lib/home";
 import { legalPage } from "./lib/legal";
 import { sanitizeRichText as sanitizeHtml } from "./lib/sanitize";
 import { cacheControlFor, isAdminPath, isAssetPassthrough, securityHeaders } from "./lib/security";
-import { accessConfig, isSameOrigin, verifyAccessToken } from "./lib/access";
-import type { AccessConfig, AccessPrincipal } from "./lib/access";
+import { fetchSupabaseUser, isAdminIdentity, normalizeSupabaseUrl, profileRoleIsAdmin, supabaseAuthConfig, verifySupabaseToken } from "./lib/supabaseAuth";
+import type { SupabaseAuthConfig } from "./lib/supabaseAuth";
 import { issueCsrfToken, verifyCsrfToken } from "./lib/csrf";
-import { DEFAULT_JSON_LIMIT, isJsonRequest, readJson } from "./lib/request";
+import { DEFAULT_JSON_LIMIT, bearerToken, isJsonRequest, isSameOrigin, readJson } from "./lib/request";
 import { createRateLimiter } from "./lib/rateLimit";
 
 // Cloudflare Worker: API + sitemap/robots + SEO HTML fallback. D1 persistent storage.
@@ -37,9 +37,18 @@ interface Env {
   TRUSTED_GAME_HOSTS?: string;
   ENVIRONMENT?: string;
   LOCAL_DEV_AUTH?: string;
-  ACCESS_TEAM_DOMAIN?: string;
-  ACCESS_AUD?: string;
-  ADMIN_EMAILS?: string;
+  /** Supabase project origin, e.g. https://abcdefgh.supabase.co */
+  SUPABASE_URL?: string;
+  /** Signing secret from Supabase → Settings → API → JWT Settings (HS256 projects). */
+  SUPABASE_JWT_SECRET?: string;
+  /** Public anon key; only needed to verify tokens remotely or read profiles. */
+  SUPABASE_ANON_KEY?: string;
+  /** Optional: enables the authoritative `profiles.role` lookup. */
+  SUPABASE_SERVICE_ROLE_KEY?: string;
+  /** Optional bootstrap allowlist of admin emails (comma separated). */
+  SUPABASE_ADMIN_EMAILS?: string;
+  /** Only "true" makes `user_metadata.role` count as an admin marker (it is user-writable). */
+  SUPABASE_TRUST_USER_METADATA?: string;
   CSRF_SECRET?: string;
   AI_KEYS_SECRET?: string;
   GEMINI_API_KEY?: string;
@@ -107,7 +116,7 @@ function tokenSafe(t: string): boolean {
 function newId(): string {
   return crypto.randomUUID();
 }
-// --- auth: Cloudflare Access JWT only. Local dev can opt in to a fake principal. ---
+// --- auth: Supabase Auth (email + password). Local dev can opt in to a fake principal. ---
 function isLocalDevAdmin(req: Request, env: Env): boolean {
   if (env.ENVIRONMENT === "production") return false;
   if (env.LOCAL_DEV_AUTH !== "true") return false;
@@ -119,31 +128,66 @@ function isLocalDevAdmin(req: Request, env: Env): boolean {
   }
 }
 
-async function requireAdmin(req: Request, env: Env): Promise<AccessPrincipal | null> {
-  if (isLocalDevAdmin(req, env)) return { sub: "local-dev", email: "local@localhost" };
-  const config = accessConfig(env);
-  if (!config) return null;
-  const token = req.headers.get("cf-access-jwt-assertion") || "";
-  return verifyAccessToken(token, config);
+export interface AdminPrincipal {
+  sub: string;
+  email: string;
 }
 
-// Cached probe result so an unauthenticated caller cannot turn /api/admin/me into a
-// request amplifier against the configured team domain.
-let accessProbe: { at: number; ok: boolean } | null = null;
+type AdminAuth =
+  | { ok: true; principal: AdminPrincipal }
+  | { ok: false; reason: "unauthorized" | "not_admin" };
 
-/** Best-effort check that a Cloudflare Access team actually answers at the configured domain. */
-async function accessTeamReachable(config: AccessConfig): Promise<boolean> {
+// Cache the `profiles.role` decision per subject so a signed-in non-admin cannot turn every
+// admin request into a service-role round-trip.
+const profileRoleCache = new Map<string, { at: number; admin: boolean }>();
+
+async function profileAdmin(config: SupabaseAuthConfig, sub: string): Promise<boolean> {
+  if (!config.serviceRoleKey) return false;
   const now = Date.now();
-  if (accessProbe && now - accessProbe.at < 60_000) return accessProbe.ok;
-  let ok = false;
-  try {
-    const res = await fetch(`${config.teamDomain}/cdn-cgi/access/certs`, { signal: AbortSignal.timeout(3000) });
-    ok = res.ok;
-  } catch {
-    ok = false;
+  const hit = profileRoleCache.get(sub);
+  if (hit && now - hit.at < 60_000) return hit.admin;
+  const admin = await profileRoleIsAdmin(config, sub);
+  // Bound the map: it is per isolate and only ever keyed by real Supabase subjects.
+  if (profileRoleCache.size > 500) profileRoleCache.clear();
+  profileRoleCache.set(sub, { at: now, admin });
+  return admin;
+}
+
+/**
+ * Accepts a request only when it carries a valid Supabase session belonging to an
+ * administrator. Returns the reason on failure so /api/admin/me can explain it.
+ */
+async function requireAdmin(req: Request, env: Env): Promise<AdminAuth> {
+  if (isLocalDevAdmin(req, env)) return { ok: true, principal: { sub: "local-dev", email: "local@localhost" } };
+  const config = supabaseAuthConfig(env);
+  const token = bearerToken(req);
+  if (!config || !token) return { ok: false, reason: "unauthorized" };
+  const identity = config.jwtSecret
+    ? await verifySupabaseToken(token, config)
+    : await fetchSupabaseUser(token, config);
+  if (!identity) return { ok: false, reason: "unauthorized" };
+  if (isAdminIdentity(identity, config) || (await profileAdmin(config, identity.sub))) {
+    return { ok: true, principal: { sub: identity.sub, email: identity.email } };
   }
-  accessProbe = { at: now, ok };
-  return ok;
+  return { ok: false, reason: "not_admin" };
+}
+
+/** Rejects a request with the right status for the failure reason. Never echoes secrets. */
+function adminAuthError(auth: Extract<AdminAuth, { ok: false }>, H: Record<string, string>): Response {
+  if (auth.reason === "not_admin") {
+    return json(
+      { error: "This account is signed in but is not an administrator.", code: "not_admin" },
+      403,
+      H,
+    );
+  }
+  return json({ error: "Unauthorized", code: "unauthorized" }, 401, H);
+}
+
+/** The Supabase origin must be reachable from the admin page, or sign-in is blocked by CSP. */
+function supabaseConnectOrigins(env: Env): string[] {
+  const url = normalizeSupabaseUrl(env.SUPABASE_URL);
+  return url ? [url] : [];
 }
 
 function adminOriginAllowed(req: Request, env: Env): boolean {
@@ -178,7 +222,7 @@ function adminCsrfSecret(env: Env): string | null {
   return null;
 }
 
-async function adminMutationAllowed(req: Request, env: Env, principal: AccessPrincipal): Promise<boolean> {
+async function adminMutationAllowed(req: Request, env: Env, principal: AdminPrincipal): Promise<boolean> {
   if (!adminOriginAllowed(req, env)) return false;
   const secret = adminCsrfSecret(env);
   if (!secret) return false;
@@ -393,7 +437,7 @@ function landingText(b: Record<string, unknown>): string {
 }
 
 function secHeaders(env: Env, url?: URL): Record<string, string> {
-  return securityHeaders(url ?? new URL(SITE_DEFAULT), trustedHosts(env));
+  return securityHeaders(url ?? new URL(SITE_DEFAULT), trustedHosts(env), false, supabaseConnectOrigins(env));
 }
 
 export default {
@@ -575,38 +619,24 @@ export default {
         headers: { "content-type": "text/plain", "Cache-Control": "public, max-age=300", ...H },
       });
     }
-    // --- auth: Cloudflare Access only (edge handles login/logout) ---
+    // --- auth: Supabase session (email + password) + admin authorization ---
     if (path === "/api/admin/me" && req.method === "GET") {
-      const principal = await requireAdmin(req, env);
-      if (!principal) {
-        // Say *why* the dashboard is closed: missing secrets, a team domain that does not answer,
-        // or simply not signed in. No credential or secret value is ever echoed back.
-        const config = accessConfig(env);
-        if (!config) {
-          return json(
-            { error: "Cloudflare Access is not configured yet (ACCESS_TEAM_DOMAIN, ACCESS_AUD, ADMIN_EMAILS).", code: "access_not_configured" },
-            503,
-            H,
-          );
-        }
-        if (!(await accessTeamReachable(config))) {
-          return json(
-            { error: "No Cloudflare Access team answered at the configured team domain. Create the Zero Trust application first.", code: "access_team_unreachable" },
-            503,
-            H,
-          );
-        }
-        return json({ error: "Unauthorized", code: "unauthorized" }, 401, H);
-      }
+      const auth = await requireAdmin(req, env);
+      if (!auth.ok) return adminAuthError(auth, H);
       const secret = adminCsrfSecret(env);
       if (!secret) return json({ error: "CSRF secret not configured." }, 503, H);
-      return json({ ok: true, email: principal.email, csrf: await issueCsrfToken(secret, principal.sub) }, 200, H);
+      return json(
+        { ok: true, email: auth.principal.email, csrf: await issueCsrfToken(secret, auth.principal.sub) },
+        200,
+        H,
+      );
     }
 
     // --- protected admin CRUD (games/categories/posts/comments/settings/overview) ---
     if (path.startsWith("/api/admin/")) {
-      const principal = await requireAdmin(req, env);
-      if (!principal) return json({ error: "Unauthorized" }, 401, H);
+      const auth = await requireAdmin(req, env);
+      if (!auth.ok) return adminAuthError(auth, H);
+      const principal = auth.principal;
       if (req.method !== "GET" && req.method !== "HEAD" && !(await adminMutationAllowed(req, env, principal))) {
         return json({ error: "CSRF check failed." }, 403, H);
       }

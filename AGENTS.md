@@ -30,8 +30,8 @@
 ## Security
 - Server validates game/image URLs; blocks javascript:/data:/file:/localhost/private; allowlist `TRUSTED_GAME_HOSTS` (shared default `DEFAULT_GAME_HOSTS` in `src/lib/validate.ts`, used by both worker and client player; `isHostAllowed` also matches subdomains of an entry on a dot boundary, so e.g. `github.io` covers any `*.github.io`).
 - Iframe `sandbox="allow-scripts allow-same-origin allow-forms allow-pointer-lock"`, no raw HTML embeds, no server proxy. `allow-same-origin` keeps the frame's real origin so game engines can use `document.cookie`/`localStorage` and fetch their own assets (without it they throw and stall on "Downloading file: 0%"); it stays safe because the frame is always cross-origin — `validateGameUrl(..., selfHost)` refuses to embed the site's own host, worker included.
-- Auth: Cloudflare Access JWT only (`cf-access-jwt-assertion`, team domain + AUD + allowlisted email). Local dev bypass requires `ENVIRONMENT!=="production"`, `LOCAL_DEV_AUTH=true`, and a localhost host. Admin mutations also require same-origin + a subject-bound CSRF token.
-- Never commit secrets; configure `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, `ADMIN_EMAILS`, `CSRF_SECRET`, and `AI_KEYS_SECRET` in the deployment environment. There is no app password/login store.
+- Auth: Supabase Auth (email + password) only. The browser signs in with `supabase.auth.signInWithPassword` (`src/lib/supabase.ts`), keeps the session in namespaced local storage, and sends `Authorization: Bearer <access_token>` through `adminFetch` (`src/lib/adminApi.ts`). The Worker verifies the JWT (`src/lib/supabaseAuth.ts`: HS256 with `SUPABASE_JWT_SECRET`, asymmetric via JWKS; remote `GET /auth/v1/user` fallback when no secret) and then demands an administrator: `SUPABASE_ADMIN_EMAILS`, `app_metadata.role`, or `profiles.role` (service role). The top-level `role` claim is the Postgres role and never grants admin; `user_metadata` is user-writable and only honoured with `SUPABASE_TRUST_USER_METADATA=true`. `/api/admin/me` returns `200` admin, `401` no/invalid session, `403 not_admin`. Local dev bypass requires `ENVIRONMENT!=="production"`, `LOCAL_DEV_AUTH=true`, and a localhost host. Admin mutations also require same-origin + a subject-bound CSRF token.
+- Never commit secrets; configure `SUPABASE_URL`, `SUPABASE_JWT_SECRET`, `CSRF_SECRET`, and `AI_KEYS_SECRET` in the deployment environment (optional: `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ADMIN_EMAILS`), plus the public build values `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`. There is no app password/login store.
 - Gemini keys: encrypt at rest (AES-GCM from dedicated `AI_KEYS_SECRET`), only expose a masked hint, allowlist verified free model ids server-side, cap daily requests, and surface normalized error codes (never log/return raw provider responses). Never trust a client-supplied model id.
 - Test fixtures must never contain a real credential: use obviously fake values (`AQ.FAKE_TEST_KEY_…`, `AIzaSyTESTONLY_…`). GitHub push protection blocks the push otherwise — and it is right to.
 
@@ -53,6 +53,8 @@ D1 create → migrations → secrets → build → deploy → domain → verify 
 Current state (2026-10-26): Worker `slopecurve` is live at `https://slopecurve.hamdi708090.workers.dev`
 on account `a2cf8c46059a89fb2534486b47b6e05e`; D1 `slopecurve-db` (`3aa5cb41-323e-4399-bb02-cad56f322964`,
 WEUR) has all 6 migrations and the 8 games + 6 categories + 2 posts + settings. `CSRF_SECRET` and
-`AI_KEYS_SECRET` are set. Cloudflare Access is **not** configured yet — `/api/admin/*` returns 401
-(fail-closed), so the CMS is intentionally unreachable. `slopecurve.com` still points at Namecheap
-nameservers and is not attached to the Worker.
+`AI_KEYS_SECRET` are set. Cloudflare Access has been **removed** in favour of Supabase Auth; no
+Supabase project/credentials are configured yet, so `/api/admin/*` returns 401 (fail-closed) and the
+CMS stays unreachable until `SUPABASE_URL` + `SUPABASE_JWT_SECRET` are set. `slopecurve.com` still
+points at Namecheap nameservers and is not attached to the Worker. The legacy `ACCESS_TEAM_DOMAIN`,
+`ACCESS_AUD` and `ADMIN_EMAILS` secrets can be deleted with `wrangler secret delete`.

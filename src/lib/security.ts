@@ -21,7 +21,7 @@ export function cacheControlFor(path: string): string {
   return "public, max-age=0, must-revalidate";
 }
 
-export function securityHeaders(url: URL, gameHosts: string[], forceLocal = false): Record<string, string> {
+export function securityHeaders(url: URL, gameHosts: string[], forceLocal = false, extraConnectSrc: string[] = []): Record<string, string> {
   const isLocal = forceLocal || url.hostname === "localhost" || url.hostname === "127.0.0.1";
   const frameSrc = gameHosts.length
     ? gameHosts.flatMap((host) => {
@@ -31,7 +31,11 @@ export function securityHeaders(url: URL, gameHosts: string[], forceLocal = fals
       }).join(" ")
     : "'none'";
   const scriptSrc = isLocal ? "script-src 'self' 'unsafe-inline'" : "script-src 'self'";
-  const connectSrc = isLocal ? "connect-src 'self' https: ws: wss:" : "connect-src 'self'";
+  // Extra origins (e.g. the Supabase project) are needed by the admin sign-in page: without
+  // them the browser blocks `signInWithPassword` and token refresh before they leave the page.
+  const extra = [...new Set(extraConnectSrc.map((s) => String(s || "").trim()).filter(Boolean))];
+  const extras = extra.length ? ` ${extra.join(" ")}` : "";
+  const connectSrc = isLocal ? `connect-src 'self' https: ws: wss:${extras}` : `connect-src 'self'${extras}`;
   const csp = [
     "default-src 'self'",
     "img-src 'self' https: data:",

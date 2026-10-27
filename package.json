@@ -16,6 +16,7 @@
     "db:apply:remote": "wrangler d1 migrations apply slopecurve-db --remote"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.118.0",
     "jose": "^6.2.13",
     "react": "18.3.1",
     "react-dom": "18.3.1",
