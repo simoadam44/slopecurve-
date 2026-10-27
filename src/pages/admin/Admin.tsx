@@ -6,6 +6,7 @@ import { DEFAULT_HOME_GAME } from "../../lib/home";
 import { adminFetch, setAdminCsrfToken } from "../../lib/adminApi";
 import { adminLoginHref, currentAdminNext } from "../../lib/adminRoute";
 import { signOutAdmin } from "../../lib/supabase";
+import { useDocumentMeta } from "../../components/Layout";
 
 async function me(): Promise<boolean> {
   try {
@@ -73,6 +74,9 @@ const NAV = [
 
 export function AdminLayout() {
   const [open, setOpen] = useState(false);
+  // The sign-in page sets its own title; without this the tab keeps saying "Admin sign in"
+  // after a successful login and looks like the sign-in silently failed.
+  useDocumentMeta("Dashboard | SlopeCurve admin", "SlopeCurve administration dashboard.");
   const linkStyle = ({ isActive }: { isActive: boolean }) => ({
     display: "block", padding: "8px 10px", borderRadius: 8,
     background: isActive ? "#0a2a33" : "transparent",
